@@ -174,6 +174,8 @@ def _observe(video, tracks, intrinsics, first, extractor, check, notify):
                 if points is None:
                     if accelerator.is_initialized():
                         accelerator.empty_cache()
+                    elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+                        torch.mps.empty_cache()
                     size = max(1, len(chunk) // 2)
                     continue
                 if points.shape != (len(chunk), len(MHR_JOINTS), 3):

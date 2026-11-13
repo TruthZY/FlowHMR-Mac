@@ -4,7 +4,9 @@ Body inference supplies the hand boxes. Hand inference stops at the decoder
 tokens consumed by FlowHMR, before the unused fusion and refinement stages.
 """
 
-from contextlib import nullcontext
+import os
+import time
+from contextlib import contextmanager, nullcontext
 
 import numpy as np
 import torch
@@ -14,6 +16,103 @@ from .sam_feature_only import unmasked_features
 
 class _HandTokensReady(Exception):
     """Local control flow: the hand decoder has produced its conditioning token."""
+
+
+def _sync_device(device) -> None:
+    if device.type == "mps":
+        torch.mps.synchronize()
+    elif device.type == "cuda":
+        torch.cuda.synchronize()
+
+
+class SamPhaseProfiler:
+    """Opt-in per-module timing for the SAM stage (``FLOWHMR_SAM_PROFILE=1``).
+
+    MPS queues work lazily, so every measurement is bracketed by a device
+    synchronisation. ``self`` excludes time spent in nested watched modules,
+    ``incl`` includes it; ``other`` is the forward code around them. The
+    profiler itself slows the run down, so compare shares, not absolute totals.
+    """
+
+    MODULES = (
+        ("backbone", "backbone"),
+        ("decoder", "body_decoder"),
+        ("decoder_hand", "hand_decoder"),
+        ("head_pose", "mhr_head"),
+        ("head_pose_hand", "hand_mhr_head"),
+        ("prompt_encoder", "prompt_encoder"),
+    )
+
+    def __init__(self, model, device):
+        self.device = torch.device(device)
+        self.inclusive = {}
+        self.exclusive = {}
+        self.calls = {}
+        self._stack = []
+        self._handles = []
+        for attr, label in self.MODULES:
+            module = getattr(model, attr, None)
+            if not isinstance(module, torch.nn.Module):
+                continue
+            self._handles.append(module.register_forward_pre_hook(self._before(label)))
+            self._handles.append(module.register_forward_hook(self._after(label)))
+
+    def _before(self, label):
+        def hook(_module, _args):
+            _sync_device(self.device)
+            self._stack.append([label, time.perf_counter(), 0.0])
+        return hook
+
+    def _after(self, label):
+        def hook(_module, _args, _output):
+            _sync_device(self.device)
+            now = time.perf_counter()
+            name, start, child = self._stack.pop()
+            elapsed = now - start
+            self.inclusive[name] = self.inclusive.get(name, 0.0) + elapsed
+            self.exclusive[name] = self.exclusive.get(name, 0.0) + elapsed - child
+            self.calls[name] = self.calls.get(name, 0) + 1
+            if self._stack:
+                self._stack[-1][2] += elapsed
+        return hook
+
+    @contextmanager
+    def span(self, label):
+        _sync_device(self.device)
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            _sync_device(self.device)
+            elapsed = time.perf_counter() - start
+            self.exclusive[label] = self.exclusive.get(label, 0.0) + elapsed
+            self.inclusive[label] = self.inclusive.get(label, 0.0) + elapsed
+            self.calls[label] = self.calls.get(label, 0) + 1
+
+    def report(self, frames, wall):
+        rows = sorted(self.exclusive.items(), key=lambda item: -item[1])
+        width = max([len(name) for name, _ in rows] + [10])
+        lines = [f"[sam-profile] {frames} frames in {wall:.1f}s ({wall / max(frames, 1):.2f} s/frame)"]
+        for name, seconds in rows:
+            incl = self.inclusive.get(name, seconds)
+            other = incl - seconds
+            calls = self.calls.get(name, 0)
+            lines.append(
+                f"  {name:<{width}}  self {seconds:7.2f}s  incl {incl:7.2f}s"
+                f"  ({100 * incl / max(wall, 1e-9):5.1f}%)  n={calls}"
+                + (f"  nested {other:6.2f}s" if other > 0.01 else "")
+            )
+        return "\n".join(lines)
+
+    def close(self):
+        for handle in self._handles:
+            handle.remove()
+        self._handles.clear()
+        self._stack.clear()
+
+
+def profiler_enabled() -> bool:
+    return os.environ.get("FLOWHMR_SAM_PROFILE") == "1"
 
 
 def _combine_batches(batches, device):
@@ -29,7 +128,7 @@ def _combine_batches(batches, device):
 @torch.no_grad()
 def extract_tokens(estimator, images, boxes, cameras, *, gpu_preprocess=False,
                    merge_hands=False, hand_boxes_out=None, hand_boxes_only=False,
-                   hand_indices=None, fast_features=False, hand_skeleton=None):
+                   hand_indices=None, fast_features=False, hand_skeleton=None, profiler=None):
     """Return CPU float32 ``(frames, 3072)`` tokens in body/left/right order.
 
     ``images`` contains RGB uint8 frames, one selected person per frame.
@@ -140,16 +239,20 @@ def extract_tokens(estimator, images, boxes, cameras, *, gpu_preprocess=False,
                 return collected_tokens()
             frames = ([torch.as_tensor(np.ascontiguousarray(img), device=device) for img in images]
                       if gpu_preprocess else images)
-            body_batch = _combine_batches([
-                prepare(image, box, camera, estimator.transform)
-                for image, box, camera in zip(frames, boxes, cameras)
-            ], device)
+            prepare_ctx = profiler.span("prepare") if profiler is not None else nullcontext()
+            with prepare_ctx:
+                body_batch = _combine_batches([
+                    prepare(image, box, camera, estimator.transform)
+                    for image, box, camera in zip(frames, boxes, cameras)
+                ], device)
             model._initialize_batch(body_batch)
             body = model.forward_step(body_batch, decoder_type="body")
             # Upstream _get_hand_box indexes affine_trans[0, person]. Expose the
             # flattened frame transforms in that layout without mixing cameras.
             geometry = {"affine_trans": body_batch["affine_trans"].flatten(0, 1).unsqueeze(0)}
-            left_boxes, right_boxes = model._get_hand_box(body, geometry)
+            hand_box_ctx = profiler.span("hand_box") if profiler is not None else nullcontext()
+            with hand_box_ctx:
+                left_boxes, right_boxes = model._get_hand_box(body, geometry)
             del body, body_batch
             if hand_boxes_only:
                 return torch.from_numpy(np.stack((left_boxes, right_boxes), axis=1).astype(np.float32))
@@ -164,7 +267,9 @@ def extract_tokens(estimator, images, boxes, cameras, *, gpu_preprocess=False,
                             box[[0, 2]] = image.shape[1] - box[[2, 0]] - 1
                             image = image.flip(1) if gpu_preprocess else image[:, ::-1]
                         batches.append(prepare(image, box, cameras[index], estimator.transform_hand))
-                batch = _combine_batches(batches, device)
+                hand_prepare_ctx = profiler.span("hand_prepare") if profiler is not None else nullcontext()
+                with hand_prepare_ctx:
+                    batch = _combine_batches(batches, device)
                 model._initialize_batch(batch)
                 try:
                     model.forward_step(batch, decoder_type="hand")

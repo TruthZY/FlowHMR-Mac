@@ -5,6 +5,7 @@ import os.path as osp
 import sys
 import time
 import weakref
+from contextlib import nullcontext
 from typing import Callable, List, Optional, Tuple, Union
 
 import cv2
@@ -220,7 +221,7 @@ class Sam3DTokenExtractor:
 
     def extract_frames(self, images, boxes, cameras, *, frame_batch_size=None,
                        use_gpu_preprocess=None, hand_boxes_out=None, hand_boxes_only=False,
-                       merge_hands=True, hand_indices=None) -> Tensor:
+                       merge_hands=True, hand_indices=None, profiler=None) -> Tensor:
         """Extract body and both hand tokens without full SAM postprocessing.
 
         Defaults use sixteen video frames per batch and GPU crop preprocessing.
@@ -258,7 +259,8 @@ class Sam3DTokenExtractor:
                 self.estimator, images[start:stop], boxes[start:stop], cameras[start:stop],
                 gpu_preprocess=gpu_preprocess, merge_hands=merge_hands,
                 hand_boxes_out=hand_boxes_out, hand_boxes_only=hand_boxes_only,
-                hand_indices=local, fast_features=self.fast_features, hand_skeleton=self._hand_skeleton,
+                hand_indices=local, fast_features=self.fast_features,
+                hand_skeleton=self._hand_skeleton, profiler=profiler,
             ))
         return tokens[0] if len(tokens) == 1 else torch.cat(tokens)
 
@@ -347,6 +349,10 @@ class Sam3DTokenExtractor:
 
         device = torch.device(self.estimator.device)
         total_frames = self._get_total_frames(video_path)
+
+        from .lite_sam_infer import SamPhaseProfiler, profiler_enabled
+
+        profiler = SamPhaseProfiler(self.estimator.model, device) if profiler_enabled() else None
 
         bbox_xyxy = bbox_xyxy.detach().cpu().to(torch.float32)
         K_all = K_all.detach().cpu().to(torch.float32)
@@ -457,6 +463,7 @@ class Sam3DTokenExtractor:
                             hand_boxes_out=hand_boxes, hand_boxes_only=_hand_boxes_only,
                             merge_hands=not low_memory,
                             hand_indices=hand_samples(first, count),
+                            profiler=profiler,
                         )
                     tokens = tokens if _hand_boxes_only else tokens[:, :token_dim]
                     if output is None:
@@ -500,6 +507,9 @@ class Sam3DTokenExtractor:
             cap.release()
             if planner is not None:
                 planner.close()
+            if profiler is not None:
+                print(profiler.report(done, time.time() - t_start))
+                profiler.close()
 
         if done == 0:
             raise ValueError(f"no frames extracted from video: {video_path}")

@@ -9,6 +9,9 @@ Options: python app.py --help. Implementation: tools/web/server.py.
 import os
 import runpy
 
+# MPS lacks kernels for a few linear-algebra ops; fall back to CPU instead of failing.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
 if __name__ in ("__main__", "__mp_main__"):
     from flowhmr.runtime_environments import RUNTIME
 

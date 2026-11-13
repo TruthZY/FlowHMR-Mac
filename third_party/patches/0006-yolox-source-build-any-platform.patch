@@ -1,0 +1,13 @@
+diff --git a/setup.py b/setup.py
+index 5fec797..8995819 100644
+--- a/setup.py
++++ b/setup.py
+@@ -46,7 +46,7 @@ def get_long_description():
+ 
+ def get_ext_modules():
+     ext_module = []
+-    if sys.platform != "win32":  # pre-compile ops on linux
++    if sys.platform == "linux":  # pre-compile ops on linux only
+         assert TORCH_AVAILABLE, "torch is required for pre-compiling ops, please install it first."
+         # if any other op is added, please also add it here
+         from yolox.layers import FastCOCOEvalOp

@@ -414,7 +414,9 @@ def _load_vggt_model(checkpoint_path: str, device: torch.device, compact: bool) 
 
 def _predict_camera(model, images, device, *, compact=False):
     dtype = _vggt_dtype(device) if device.type == "cuda" else None
-    with torch.autocast("cuda", dtype=dtype, enabled=device.type == "cuda"):
+    context = (torch.autocast("cuda", dtype=dtype) if device.type == "cuda"
+               else nullcontext())
+    with context:
         tokens, patch_start = model.aggregator(images.unsqueeze(0))
         # CameraHead consumes only camera/register tokens from the last layer.
         # Copy that small slice before releasing the image tokens.
@@ -427,7 +429,9 @@ def _predict_camera(model, images, device, *, compact=False):
     try:
         if staged:
             head.to(device)
-        with torch.autocast(device.type, enabled=False):
+        head_context = (torch.autocast("cuda", enabled=False) if device.type == "cuda"
+                        else nullcontext())
+        with head_context:
             return head([camera_tokens], patch_token_start=patch_start).float().cpu()
     finally:
         if staged:

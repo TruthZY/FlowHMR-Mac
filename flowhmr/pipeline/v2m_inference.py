@@ -652,7 +652,10 @@ class V2MInferenceEngine:
             reason = "Shared GPU memory" if shared_gpu else "Low VRAM"
             print(f"  [gpu] {reason}: load inactive models on CPU, move each to the GPU for its stage", flush=True)
 
-        detector = build_human_detector(resident)
+        # YOLOX post-processing relies on torchvision NMS kernels, which are CPU/CUDA
+        # only; keep detection on the host on MPS machines.
+        detector_device = resident if resident.type == "cuda" else torch.device("cpu")
+        detector = build_human_detector(detector_device)
         proc = VideoProcessor(detector=detector)
         if stage_models:
             staged[StageName.DETECTION] = (detector.model, detector)

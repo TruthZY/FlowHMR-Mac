@@ -57,7 +57,7 @@ def memory_error_resource(error):
     message = str(error).lower()
     if (isinstance(error, MemoryError) or "defaultcpuallocator" in message or
             ("opencv" in message and "insufficient memory" in message) or
-            "winerror 1455" in message):
+            "winerror 1455" in message or "mps backend out of memory" in message):
         return "ram"
     if isinstance(error, torch.cuda.OutOfMemoryError) or any(phrase in message for phrase in (
         "cuda out of memory", "cuda error: out of memory", "cuda driver error: out of memory",
@@ -246,8 +246,11 @@ class SAMBatchPlanner:
         print("  [sam] using CPU crops and separate hand passes to save VRAM", flush=True)
 
     def release_cache(self):
-        with self.accelerator.device(self.device):
-            self.accelerator.empty_cache()
+        if self.accelerator is not None:
+            with self.accelerator.device(self.device):
+                self.accelerator.empty_cache()
+        elif self.device.type == "mps":
+            torch.mps.empty_cache()
 
     def retry(self, count, resource):
         if count > 1:
@@ -256,8 +259,7 @@ class SAMBatchPlanner:
         else:
             self.split_hands()
             self.retry_limit = self.retry_size = 1
-        if self.gpu:
-            self.release_cache()
+        self.release_cache()
         self.info["retries"] += 1
         print(f"  [sam] {resource.upper()} allocation retry {self.info['retries']}: "
               f"batch={self.retry_size}, separate hands={self.low_memory}", flush=True)
