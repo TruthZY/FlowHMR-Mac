@@ -38,6 +38,12 @@
 
 纯 CPU 和 Intel XPU 暂不支持 HaMeR 手指精修，SAM 自带的手部估计仍会执行。纯 CPU 或核显建议配备至少 32 GB 系统内存并先用短片试跑。
 
+## macOS 运行
+
+Apple Silicon 上可源码运行（PyTorch MPS，必要时回退 CPU），网页界面用浏览器打开；
+需要登录的 SMPL-H / MANO 包可从 hf-mirror 的 `4_SMPLhub` 获取。安装、模型与限制见
+[macOS 运行说明](docs/macos.md)。
+
 ## Windows 桌面版
 
 - **导入视频，在一个窗口完成动捕。** 选择要处理的人物和帧范围，生成后并排看原视频和 3D 动作。时间轴可同步播放、拖动和循环，可播放原声，也可以切换蒙皮和骨架显示。

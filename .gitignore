@@ -17,6 +17,8 @@ ckpts/
 /models/*
 !/models/README.md
 /third_party/hamer_inference/
+# optional source trees fetched by tools/macos/setup.sh (see docs/macos.md)
+/third_party/dinov3/
 
 # python
 .venv/

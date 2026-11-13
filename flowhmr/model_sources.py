@@ -11,7 +11,15 @@ HF_MIRROR = "https://hf-mirror.com"
 HF_OFFICIAL = "https://huggingface.co"
 MODELSCOPE = "https://www.modelscope.cn"
 YOLOX_URL = "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_l.pth"
+YOLOX_MIRROR_URLS = (
+    f"https://ghfast.top/{YOLOX_URL}",
+    f"https://gh-proxy.com/{YOLOX_URL}",
+)
 REGRESSOR_URL = "https://raw.githubusercontent.com/zju3dv/GVHMR/main/hmr4d/utils/body_model/smpl_neutral_J_regressor.pt"
+REGRESSOR_MIRROR_URLS = (
+    "https://cdn.jsdelivr.net/gh/zju3dv/GVHMR@main/hmr4d/utils/body_model/smpl_neutral_J_regressor.pt",
+    "https://ghfast.top/" + REGRESSOR_URL,
+)
 MANO_URL = "https://mano.is.tue.mpg.de/download.php"
 SMPLH_DOWNLOAD = ("Extended SMPL+H model", "smplh.tar.xz")
 MANO_DOWNLOAD = ("Models & Code", f"{files.MANO_BUNDLE}.zip")
@@ -63,10 +71,12 @@ PUBLIC_ASSETS = {
         _flowhmr_asset(files.FLOWHMR_CONFIG, 3067, "5deae01800c031975558bf9675819e8d1e24803414f692b8b5c2196b266c64d7"),
         _flowhmr_asset(files.FLOWHMR_CKPT, 1841702021, "b7eb06b119feaf5ad7287bafdb2fff38d42dfc22ea9d256f8cdd2ada26dfc53a"),
     ),
-    "yolox": (Asset(files.YOLOX, 434357141, "1e6b7fa6240375370b2a8a8eab9066b3cdd43fd1d0bfa8d2027fd3a51def2917", (YOLOX_URL,)),),
+    "yolox": (Asset(files.YOLOX, 434357141, "1e6b7fa6240375370b2a8a8eab9066b3cdd43fd1d0bfa8d2027fd3a51def2917",
+                    (YOLOX_URL, *YOLOX_MIRROR_URLS)),),
     "sam": _perception_assets[:3],
     "vggt": _perception_assets[3:],
-    "joint-regressor": (Asset(files.JOINT_REGRESSOR, 662187, "70e3213bd30fe8d8ce37b54675282745e406f915a51511a003aeff99b6da04cf", (REGRESSOR_URL,)),),
+    "joint-regressor": (Asset(files.JOINT_REGRESSOR, 662187, "70e3213bd30fe8d8ce37b54675282745e406f915a51511a003aeff99b6da04cf",
+                              (REGRESSOR_URL, *REGRESSOR_MIRROR_URLS)),),
 }
 
 HAMER_CODE = Asset(".downloads/hamer-source.zip", 2314326, HAMER_SOURCE_SHA256, (HAMER_SOURCE_URL,))

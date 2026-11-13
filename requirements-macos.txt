@@ -1,0 +1,22 @@
+# FlowHMR runtime for macOS (Apple Silicon, MPS or CPU).
+# Windows wheels (CUDA runtime manager, pywebview desktop shell) are not used here.
+torch==2.8.0
+torchvision==0.23.0
+numpy==1.26.4
+opencv-python==4.11.0.86
+accelerate
+torchdiffeq
+scipy
+transforms3d
+einops
+matplotlib
+PyYAML
+omegaconf
+tqdm
+joblib
+imageio
+webdataset
+
+-r tools/web/requirements.txt
+
+pybind11==2.11.1
