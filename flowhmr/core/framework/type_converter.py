@@ -6,14 +6,9 @@ from torch import nn
 
 def get_module_device(module: nn.Module) -> torch.device:
     try:
-        next(module.parameters())
+        return next(module.parameters()).device
     except StopIteration:
         raise ValueError("The input module should contain parameters.")
-
-    if next(module.parameters()).is_cuda:
-        return torch.device(next(module.parameters()).get_device())
-
-    return torch.device("cpu")
 
 
 def cast_to_module_dtype(x: Any, module: torch.nn.Module, device: Optional[torch.device] = None) -> Any:

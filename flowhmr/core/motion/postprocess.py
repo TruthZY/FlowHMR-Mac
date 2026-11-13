@@ -1,5 +1,7 @@
+from functools import partial
+
 import torch
-from torch.cuda.amp import autocast
+from torch.amp import autocast as _amp_autocast
 import numpy as np
 import os
 from datetime import datetime
@@ -11,6 +13,8 @@ from .ccd_ik import CCD_IK
 from .ccd_ik_full import CCDIKFull, Activation
 from ..utils.net_utils import gaussian_smooth
 from ..bodymodels.fk_utils import get_joints_from_smpl_params, get_fkmat_from_smpl_params
+
+autocast = partial(_amp_autocast, "cuda")
 
 
 def _save_ik_debug_comparison(fk_j3d_original, post_target_j3d, fk_j3d_after_ik, joint_ids, joint_names, debug_dir, timestamp):

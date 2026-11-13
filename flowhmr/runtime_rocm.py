@@ -1,7 +1,6 @@
 """Architecture-specific Windows ROCm packages, adapter detection and startup."""
 
 import ctypes
-from ctypes import wintypes
 from dataclasses import dataclass
 from functools import lru_cache
 import json
@@ -183,6 +182,18 @@ PACKAGES = PROFILES[PROFILE].packages  # Retain the legacy discrete slot's manif
 
 def windows_11():
     return sys.platform == "win32" and sys.getwindowsversion().build >= 22000
+
+
+if sys.platform == "win32":
+    from ctypes import wintypes
+else:
+    # These Win32 structures are only read on Windows; bind the same underlying
+    # ctypes types so the module still imports on other platforms.
+    class wintypes:
+        DWORD = ctypes.c_ulong
+        BOOL = ctypes.c_int
+        WCHAR = ctypes.c_wchar
+        LPCWSTR = ctypes.c_wchar_p
 
 
 class _DisplayDevice(ctypes.Structure):
@@ -389,6 +400,9 @@ def gpu_ordinal(torch, arch=ARCH, *, ordinal=None):
 
 
 def supports_bf16(torch, device):
+    device = torch.device(device)
+    if device.type != "cuda":
+        return False
     if getattr(torch.version, "hip", None):
         # Windows HIP can report BF16 support for devices that should use FP16.
         if sys.platform == "win32":
