@@ -139,7 +139,8 @@ if (info?.postprocess_available === false) {
   setText($("postprocessHint"), m("correction.unavailable"));
 }
 params = initParams(info?.defaults ?? {}, info?.sam_manual_default ?? 24,
-  !!info?.sam_hybrid_available, !!info?.camera_on_cpu_for_amd_igpu);
+  !!info?.sam_hybrid_available, !!info?.camera_on_cpu_for_amd_igpu,
+  !!info?.mlx_backbone_available);
 if (info?.runtime?.supported) runtime.restore();
 const jobs = (await history.refresh()) ?? [];
 const savedJob = localStorage.getItem("flowhmr-last-job");

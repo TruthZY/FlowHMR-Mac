@@ -1080,6 +1080,7 @@ class V2MInferenceEngine:
                       cancel_check: Callable[[], None] = None,
                       sam_chunk_size: int | None = 16,
                       sam_hand_stride: int = 1,
+                      sam_backbone: str = "torch",
                       details_callback: Callable[[dict], None] = None) -> str:
         """Video -> SMPL-H motion.
 
@@ -1088,6 +1089,9 @@ class V2MInferenceEngine:
         sam_hand_stride: decode both SAM hand decoders on one seeded frame per
         ``sam_hand_stride``-wide interval and linearly interpolate the remaining
         hand slots; 1 decodes every frame.
+        sam_backbone: ``torch`` runs the SAM DINOv3 backbone on the torch device;
+        ``mlx`` serves the same weights from MLX (macOS only, ~1.3x faster,
+        tokens match to ~3e-3 relative L2).
         hamer: refine the selected person's fingers before exporting the motion.
         hamer_stride: interval in video frames between hand predictions; fill gaps with rotation interpolation.
 
@@ -1102,6 +1106,10 @@ class V2MInferenceEngine:
         from flowhmr.utils.runtime_sam_features import SAM_HAND_STRIDES
         if type(sam_hand_stride) is not int or sam_hand_stride not in SAM_HAND_STRIDES:
             raise ValueError("sam_hand_stride must be 1, 2 or 4")
+        from flowhmr.utils.mlx_backbone import MISSING_MLX, mlx_available, validate_backend
+        sam_backbone = validate_backend(sam_backbone)
+        if sam_backbone == "mlx" and not mlx_available():
+            raise RuntimeError(MISSING_MLX)
         from flowhmr.utils.runtime_hamer import hamer_available, load_hand_boxes, refine_fingers, MISSING_HAMER
         from flowhmr.utils.runtime_video_processing import VideoProcessor
 
@@ -1312,7 +1320,12 @@ class V2MInferenceEngine:
         need_hand_boxes = hamer and load_hand_boxes(hand_boxes_path, t_track) is None
         if feature_cached:
             batch = {"requested": sam_chunk_size, "actual": min(t_track, sam_chunk_size) if sam_chunk_size else None,
-                     "sam_hand_stride": cached_stride, "backend": self.sam_cache_backend}
+                     "sam_hand_stride": cached_stride, "backend": self.sam_cache_backend,
+                     "sam_backbone": cached_batch.get("sam_backbone", "torch")}
+            cached_backbone = batch["sam_backbone"]
+            if cached_backbone != sam_backbone:
+                print(f"  [sam] cached features were extracted with the {cached_backbone} "
+                      f"backbone; reusing them (pass --overwrite to recompute)")
             if cached_batch.get("requested") == sam_chunk_size:
                 batch.update(cached_batch)
             _details(sam_batch={**batch, "reused": True})
@@ -1377,7 +1390,8 @@ class V2MInferenceEngine:
                     torch.cuda.empty_cache()
 
             batch = {"requested": sam_chunk_size, "actual": None, "reused": False, "retries": 0,
-                     "sam_hand_stride": sam_hand_stride, "backend": self.sam_cache_backend}
+                     "sam_hand_stride": sam_hand_stride, "backend": self.sam_cache_backend,
+                     "sam_backbone": sam_backbone}
             if sam_device.type == "cuda" and uses_shared_memory(torch, sam_device):
                 batch["shared_memory"] = True
             sam_args = dict(
@@ -1403,9 +1417,12 @@ class V2MInferenceEngine:
                 if adaptive_batch:
                     sam_args.update(adaptive_batch=True, batch_cb=_batch_progress)
                 sam_args["sam_hand_stride"] = sam_hand_stride
+                sam_args["sam_backbone"] = sam_backbone
             elif sam_hand_stride != 1:
                 print("  [sam] WARNING: this SAM backend cannot sample hands sparsely; "
                       "decoding every frame")
+            if estimator is None and sam_backbone != "torch":
+                print("  [sam] WARNING: the worker-pool SAM backend cannot use MLX; using torch")
             if not adaptive_batch or estimator is None:
                 batch["actual"] = batch["initial"] = min(t_track, sam_chunk_size or 16)
                 sam_args["frame_batch_size"] = batch["actual"]

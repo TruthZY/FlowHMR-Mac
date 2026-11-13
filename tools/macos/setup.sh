@@ -46,6 +46,10 @@ fi
 "$PYTHON" -m venv .venv
 .venv/bin/python -m pip install --upgrade pip setuptools wheel
 .venv/bin/pip install -r requirements-macos.txt
+# Opt-in MLX SAM backbone: WITH_MLX=1 tools/macos/setup.sh
+if [[ "${WITH_MLX:-0}" == "1" ]]; then
+  .venv/bin/pip install -r requirements-macos-mlx.txt
+fi
 .venv/bin/pip install --no-build-isolation --no-deps -e third_party/YOLOX
 .venv/bin/python tools/macos/download_models.py "$@"
 .venv/bin/python tools/macos/check_install.py

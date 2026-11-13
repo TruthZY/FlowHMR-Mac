@@ -428,7 +428,7 @@ SAM_HAND_STRIDES = (1, 2, 4)
 DEFAULT_PARAMS = {
     "seed": 0, "cfg_scale": 1.0, "steps": 20, "max_frames": None, "vggt_interval": 0,
     "sam_chunk_size": None, "sam_hand_stride": 1, "start_frame": 0, "end_frame": None,
-    "sam_backend": "gpu",
+    "sam_backend": "gpu", "sam_backbone": "torch",
     "postprocess": True, "manual_select": True, "auto_frames": True, "static_camera": True,
     "correction_floor_m": None, "correction_preset": "strong",
     "sole_fit": True, "sole_fit_strength": SOLE_FIT_REFERENCE_STRENGTH,
@@ -438,6 +438,19 @@ DEFAULT_PARAMS = {
 
 def default_params():
     return {**DEFAULT_PARAMS, "postprocess": DEFAULT_PARAMS["postprocess"] and native_correction_available()}
+
+
+_MLX_BACKBONE_AVAILABLE = None
+
+
+def mlx_backbone_available():
+    """Whether the optional MLX SAM backbone can run here (cached)."""
+    global _MLX_BACKBONE_AVAILABLE
+    if _MLX_BACKBONE_AVAILABLE is None:
+        from flowhmr.utils.mlx_backbone import mlx_available
+
+        _MLX_BACKBONE_AVAILABLE = mlx_available()
+    return _MLX_BACKBONE_AVAILABLE
 
 
 def _to_bool(value, default):
@@ -506,6 +519,11 @@ def parse_params(src, base=None):
     if sam_backend == "hybrid" and (str(ARGS.device).split(":", 1)[0] != "cuda"
                                     or not runtime_rocm.sam_hybrid_candidate(RUNTIME.active)):
         raise UserMessage("混合 SAM 需要 Windows AMD 核显和支持 AVX-512 BF16 的 CPU。", "sam_hybrid_unavailable")
+    sam_backbone = src.get("sam_backbone", base["sam_backbone"])
+    if sam_backbone not in ("torch", "mlx"):
+        raise UserMessage("SAM 骨干运行时须为 PyTorch 或 MLX。", "param_sam_backbone")
+    if sam_backbone == "mlx" and not mlx_backbone_available():
+        raise UserMessage("当前环境没有安装 MLX，无法使用 MLX 骨干。", "param_sam_backbone_missing")
     try:
         smoothing = float(src.get("smoothing_frames", base["smoothing_frames"]))
     except (TypeError, ValueError, OverflowError):
@@ -543,6 +561,7 @@ def parse_params(src, base=None):
         "sam_chunk_size": integer("sam_chunk_size", 1, optional=True),
         "sam_hand_stride": sam_hand_stride,
         "sam_backend": sam_backend,
+        "sam_backbone": sam_backbone,
         "postprocess": _to_bool(src.get("postprocess"), base["postprocess"]),
         "correction_floor_m": floor,
         "correction_preset": preset,
@@ -1150,6 +1169,7 @@ def run_job(job_id):
         static_camera=params.get("static_camera", False),
         sam_chunk_size=params.get("sam_chunk_size", DEFAULT_PARAMS["sam_chunk_size"]),
         sam_hand_stride=params["sam_hand_stride"],
+        sam_backbone=params.get("sam_backbone", "torch"),
         person_selector=select_person if params.get("manual_select", True) else None,
         progress_callback=on_progress,
         cancel_check=lambda: _raise_if_cancelled(job_id),
@@ -1662,6 +1682,7 @@ def api_info():
         "stages": [{"name": n, "label": l, "detail": d} for n, l, d in ALL_STAGES],
         "max_upload_mb": app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024),
         "postprocess_available": native_correction_available(),
+        "mlx_backbone_available": mlx_backbone_available(),
         "hamer_available": any(item["id"] == "hamer" and item["status"] == "ready" for item in inventory["items"]),
         "body_variants": available_variants(),
         "body_reference": smplh_reference(),

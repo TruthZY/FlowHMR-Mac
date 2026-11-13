@@ -27,7 +27,8 @@ function samChunkSize(value) {
   return value;
 }
 
-export function initParams(defaults, manualBatchDefault, hybridAvailable = false, cameraOnCpuForAmdIgpu = false) {
+export function initParams(defaults, manualBatchDefault, hybridAvailable = false,
+  cameraOnCpuForAmdIgpu = false, mlxBackboneAvailable = false) {
   const manual = bindToggle("optManual");
   const post = bindToggle("optPostprocess");
   const hamer = bindToggle("optHamer");
@@ -48,6 +49,10 @@ export function initParams(defaults, manualBatchDefault, hybridAvailable = false
   const samHandStride = $("optSamHandStride"), samBackend = $("optSamBackend");
   show("samHybridRow", hybridAvailable);
   show("samHandStrideRow", defaults?.sam_hand_stride != null);
+  const samBackbone = $("optSamBackbone");
+  const mlxOption = samBackbone?.querySelector('option[value="mlx"]');
+  if (mlxOption) mlxOption.disabled = !mlxBackboneAvailable;
+  if (samBackbone && !mlxBackboneAvailable) samBackbone.value = "torch";
   const smoothingSlider = $("optSmoothing"), smoothing = $("optSmoothingValue");
   const smoothingHint = $("smoothingHint");
   let restoredSmoothingFrames = null;
@@ -114,6 +119,7 @@ export function initParams(defaults, manualBatchDefault, hybridAvailable = false
     hamerStride.value = p.hamer_stride ?? 1;
     samHandStride.value = p.sam_hand_stride ?? 1;
     samBackend.value = p.sam_backend === "hybrid" ? "hybrid" : "gpu";
+    if (samBackbone) samBackbone.value = mlxBackboneAvailable && p.sam_backbone === "mlx" ? "mlx" : "torch";
     syncHamer();
     soleFit.value = p.sole_fit_strength ?? (p.sole_fit == null ? soleFit.defaultValue : p.sole_fit ? 0.6 : 0);
     syncSoleFitSlider();
@@ -155,6 +161,7 @@ export function initParams(defaults, manualBatchDefault, hybridAvailable = false
       sam_chunk_size: autoBatch.get() ? null : samChunkSize(samChunk.value),
       sam_hand_stride: Number(samHandStride.value),
       sam_backend: hybridAvailable || remember ? samBackend.value : "gpu",
+      sam_backbone: samBackbone?.value === "mlx" ? "mlx" : "torch",
       steps: parseInt(steps.value, 10),
       smoothing_frames: readSmoothingFrames(),
     };

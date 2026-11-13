@@ -1,0 +1,5 @@
+# Optional: MLX backend for the SAM-3D-Body backbone (macOS / Apple Silicon only).
+# Install after requirements-macos.txt:
+#   .venv/bin/pip install -r requirements-macos-mlx.txt
+# Then pick "MLX (macOS)" in the SAM backbone setting, or pass --sam_backbone mlx.
+mlx>=0.29

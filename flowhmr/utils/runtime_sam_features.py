@@ -109,7 +109,8 @@ class Sam3DTokenExtractor:
 
     def __init__(self, estimator, *, frame_batch_size=16,
                  use_gpu_preprocess=True, hand_stride=1, hand_seed=HAND_SAMPLE_SEED,
-                 fast_features=False, cpu_backbone=False, xpu_backbone=None):
+                 fast_features=False, cpu_backbone=False, xpu_backbone=None,
+                 backbone_backend="torch"):
         self.estimator = estimator
         self.faces = estimator.faces
         if type(frame_batch_size) is not int or frame_batch_size < 1:
@@ -118,6 +119,10 @@ class Sam3DTokenExtractor:
             raise ValueError("hand_stride must be one of {1, 2, 4}")
         if type(hand_seed) is not int:
             raise ValueError("hand_seed must be an integer")
+        from .mlx_backbone import BackboneSwitcher, validate_backend
+
+        self.backbone_backend = validate_backend(backbone_backend)
+        self._switcher = BackboneSwitcher(estimator.model.backbone)
         self.frame_batch_size = frame_batch_size
         self.use_gpu_preprocess = bool(use_gpu_preprocess)
         self.hand_stride = hand_stride
@@ -329,6 +334,7 @@ class Sam3DTokenExtractor:
         frame_batch_size: Optional[int] = None,
         use_gpu_preprocess: Optional[bool] = None,
         sam_hand_stride: Optional[int] = None,
+        sam_backbone: Optional[str] = None,
         adaptive_batch: bool = False,
         batch_cb: Optional[Callable[[dict], None]] = None,
         hand_boxes_out: Optional[list] = None,
@@ -346,6 +352,7 @@ class Sam3DTokenExtractor:
             raise ValueError("sam_hand_stride must be 1, 2 or 4")
         if hand_stride > 1 and use_mask:
             raise ValueError("sam_hand_stride > 1 is not supported together with use_mask")
+        backbone_backend = self.backbone_backend if sam_backbone is None else sam_backbone
 
         device = torch.device(self.estimator.device)
         total_frames = self._get_total_frames(video_path)
@@ -359,6 +366,8 @@ class Sam3DTokenExtractor:
         bbox_xyxy = self._pad_crop(bbox_xyxy, total_frames)
         K_all = self._pad_crop(K_all, total_frames)
 
+        backend_ctx = self._switcher.use(backbone_backend)
+        backend_ctx.__enter__()
         end = min(total_frames, max_frames) if max_frames is not None and max_frames > 0 else total_frames
         if not 0 <= start_frame < end:
             raise ValueError(f"Invalid SAM frame range: [{start_frame},{end})")
@@ -505,6 +514,7 @@ class Sam3DTokenExtractor:
                     )
         finally:
             cap.release()
+            backend_ctx.__exit__(None, None, None)
             if planner is not None:
                 planner.close()
             if profiler is not None:
@@ -685,8 +695,13 @@ def _select_backbone_precision(sam_model, device: torch.device) -> None:
 def build_sam3d_extractor(device: torch.device, *, frame_batch_size=16,
                           use_gpu_preprocess=True, use_compile=None, load_device=None,
                           hand_stride=1, hand_seed=HAND_SAMPLE_SEED, cpu_backbone=False,
-                          xpu_backbone_device=None) -> Sam3DTokenExtractor:
+                          xpu_backbone_device=None, backbone_backend="torch") -> Sam3DTokenExtractor:
+    from .mlx_backbone import MISSING_MLX, mlx_available, validate_backend
     from .sam_compile import enable_sam_compile, resolve_sam_compile
+
+    backbone_backend = validate_backend(backbone_backend)
+    if backbone_backend == "mlx" and not mlx_available():
+        raise RuntimeError(MISSING_MLX)
 
     device = torch.device(device)
     if xpu_backbone_device is not None:
@@ -731,7 +746,8 @@ def build_sam3d_extractor(device: torch.device, *, frame_batch_size=16,
                                use_gpu_preprocess=use_gpu_preprocess and device.type == "cuda",
                                hand_stride=hand_stride, hand_seed=hand_seed,
                                fast_features=device.type == "cpu" or uses_shared_memory(torch, device),
-                               cpu_backbone=cpu_backbone, xpu_backbone=xpu_backbone)
+                               cpu_backbone=cpu_backbone, xpu_backbone=xpu_backbone,
+                               backbone_backend=backbone_backend)
 
 
 if __name__ == "__main__":

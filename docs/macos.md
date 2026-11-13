@@ -136,7 +136,43 @@ FLOWHMR_SAM_PROFILE=1 tools/macos/run_web.sh
   FP16 加速路径，只有卷积受益，而骨干里卷积只占一小部分。
 
 结论：保持「骨干 FP16、其余 FP32」现状，不要追求全模型 FP16；要提速请减少骨干前向次数
-（手部 stride、帧范围、批次）。
+（手部 stride、帧范围、批次）或改用下面的 MLX 骨干。
+
+
+### 可选：MLX 骨干
+
+SAM 的 DINOv3 ViT-H+ 骨干有一段 MLX 实现（`flowhmr/utils/mlx_dinov3.py`），权重直接从已加载的
+torch 骨干转换，移植了 32 层全局注意力、轴向 RoPE、SwiGLU、LayerScale 和 4 个 storage token。
+解码器、MHR 头仍留在 torch 里。默认不启用。
+
+```bash
+.venv/bin/pip install -r requirements-macos-mlx.txt    # mlx>=0.29，仅 macOS
+```
+
+启用方式二选一：界面「SAM 骨干运行时」选 **MLX（macOS）**，或命令行
+`--sam_backbone mlx`。没有安装 MLX 时界面会把该选项置灰，接口也会直接报错。
+
+实测（M1 Pro，8 帧、批次 8，同进程交替两轮）：
+
+| 指标 | torch 骨干 | MLX 骨干 |
+| --- | --- | --- |
+| 整个 SAM 阶段 | 22.9 / 22.4 s | 18.4 / 18.1 s（**1.24 倍**） |
+| token 相对 L2（MLX FP16 vs torch FP16） | — | 3.3e-3（0.33%） |
+| 切回 torch 后与切之前对比 | — | **max\|d\| = 0**（权重没有离开进程，逐位一致） |
+| 权重转换耗时 | — | 0.6–0.7 s |
+| wired 峰值 / 进程退出后 | 4.5 GB | 6.6–7.0 GB / 回落到 1.9 GB |
+
+注意：
+
+- 同一时刻只有一份权重在设备上：选 MLX 时 torch 骨干权重被移到主机内存（可换页，不占 wired），
+  切回 torch 时再移回设备并释放 MLX 副本；主机内存仍会保留约 1.7 GB。
+- 首次启用要花 0.7 秒转换权重，并且每条视频的第一个批次会触发 Metal kernel 预热。
+- 张量每次前向要经 CPU 中转（约 15 ms），所以端到端是 1.24 倍左右，而不是骨干单体的 1.3 倍。
+- 实现上只做 CPU↔设备搬运，不碰 meta 设备、也不从 checkpoint 重载：早期用 `to_empty("meta")`
+  的版本在整模型规模下会让 GPU 卡死（命令提交后等不到完成信号）。
+- 多 GPU 的 worker-pool 模式（CUDA）不支持 MLX，会打印警告并继续用 torch。
+- 特征缓存不区分后端：已有的 `sam3d_feat*.pt` 会直接复用（两者差异在 0.3% 量级），
+  需要强制重算请用 `--overwrite`。
 
 ### 内存与 wired 监控
 

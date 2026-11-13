@@ -278,6 +278,17 @@
             <option value="4" data-i18n="sam.hand_stride_four">每 4 帧</option>
           </select>
         </div>
+        <div class="setting-row" id="samBackboneRow">
+          <div>
+            <div class="setting-label" data-i18n="sam.backbone">SAM 骨干运行时</div>
+            <div class="setting-help" id="samBackboneHint" data-i18n="sam.backbone_hint">MLX 用同一份权重但更快（仅 macOS，需安装 MLX）；输出的动作略有数值差异</div>
+          </div>
+          <select class="input setting-select" id="optSamBackbone"
+                  data-i18n-label="sam.backbone" aria-describedby="samBackboneHint">
+            <option value="torch" data-i18n="sam.backbone_torch">PyTorch（默认）</option>
+            <option value="mlx" data-i18n="sam.backbone_mlx">MLX（macOS）</option>
+          </select>
+        </div>
       </div>
     </section>
 
